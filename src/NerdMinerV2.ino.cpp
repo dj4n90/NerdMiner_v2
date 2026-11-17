@@ -1,4 +1,3 @@
-
 #include <Wire.h>
 
 #include <Arduino.h>
@@ -13,6 +12,7 @@
 #include "monitor.h"
 #include "drivers/displays/display.h"
 #include "drivers/storage/SDCard.h"
+//#define HW_SHA256_TEST
 #include "ShaTests/nerdSHA_HWTest.h"
 #include "timeconst.h"
 
@@ -21,7 +21,6 @@
 #endif
 
 #include <soc/soc_caps.h>
-//#define HW_SHA256_TEST
 
 //3 seconds WDT
 #define WDT_TIMEOUT 3

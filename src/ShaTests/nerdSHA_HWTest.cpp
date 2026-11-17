@@ -1,5 +1,6 @@
 #ifdef HW_SHA256_TEST
-
+#include <Arduino.h>
+#include <cstring>
 #include <soc/soc.h>
 #include "ShaTests/nerdSHA256plus.h"
 #include "mbedtls/sha256.h"
@@ -11,6 +12,7 @@
 #include <hal/gdma_types.h>
 #include <esp_crypto_shared_gdma.h>
 #include <driver/periph_ctrl.h>
+IRAM_ATTR void HwShaTest();
 
 static const uint8_t s_test_buffer[128] = 
 {
@@ -133,6 +135,27 @@ static inline void nerd_sha_ll_read_digest_swap(void* ptr)
   DPORT_INTERRUPT_RESTORE();
 }
 
+static inline bool nerd_sha_ll_read_digest_swap_if(void* ptr)
+{
+  DPORT_INTERRUPT_DISABLE();
+  uint32_t fin = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
+  if ((uint32_t)(fin & 0xFFFF) != 0)
+  {
+    DPORT_INTERRUPT_RESTORE();
+    return false;
+  }
+  ((uint32_t*)ptr)[7] = __builtin_bswap32(fin);
+  ((uint32_t*)ptr)[0] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 0 * 4));
+  ((uint32_t*)ptr)[1] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 1 * 4));
+  ((uint32_t*)ptr)[2] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 2 * 4));
+  ((uint32_t*)ptr)[3] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 3 * 4));
+  ((uint32_t*)ptr)[4] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 4 * 4));
+  ((uint32_t*)ptr)[5] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 5 * 4));
+  ((uint32_t*)ptr)[6] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 6 * 4));
+  DPORT_INTERRUPT_RESTORE();
+  return true;
+}
+
 static inline void nerd_sha_ll_read_digest(void* ptr)
 {
   DPORT_INTERRUPT_DISABLE();
@@ -199,9 +222,31 @@ static inline void nerd_sha_ll_fill_text_block_sha256_swap(const void *input_tex
     reg_addr_buf[15] = __builtin_bswap32(data_words[15]);
 }
 
-static inline void nerd_sha_ll_fill_text_block_sha256_double(const void *input_text)
+static inline void nerd_sha_ll_fill_text_block_sha256_upper(const void *input_text, uint32_t nonce)
 {
     uint32_t *data_words = (uint32_t *)input_text;
+    uint32_t *reg_addr_buf = (uint32_t *)(SHA_TEXT_BASE);
+
+    reg_addr_buf[0] = data_words[0];
+    reg_addr_buf[1] = data_words[1];
+    reg_addr_buf[2] = data_words[2];
+    reg_addr_buf[3] = __builtin_bswap32(nonce);
+    reg_addr_buf[4] = 0x80000000;
+    reg_addr_buf[5] = 0;
+    reg_addr_buf[6] = 0;
+    reg_addr_buf[7] = 0;
+    reg_addr_buf[8] = 0;
+    reg_addr_buf[9] = 0;
+    reg_addr_buf[10] = 0;
+    reg_addr_buf[11] = 0;
+    reg_addr_buf[12] = 0;
+    reg_addr_buf[13] = 0;
+    reg_addr_buf[14] = 0;
+    reg_addr_buf[15] = 0x00000280;
+}
+
+static inline void nerd_sha_ll_fill_text_block_sha256_double()
+{
     uint32_t *reg_addr_buf = (uint32_t *)(SHA_TEXT_BASE);
 
 #if 0
@@ -266,7 +311,7 @@ IRAM_ATTR void HwShaTest()
   mbedtls_sha256_free(&ctx);
 #endif
 
-#if 1
+#if 0
   //nerdSha256
   //ESP32   39KH/s
   //ESP32S3 39.01KH/s
@@ -277,6 +322,61 @@ IRAM_ATTR void HwShaTest()
   {
     nerd_sha256d(&ctx, s_test_buffer+64, hash);
   }
+#endif
+
+#if defined(CONFIG_IDF_TARGET_ESP32)
+  // Classic ESP32: benchmark matching minerWorkerHw()
+  test_count = 100000;
+
+  const uint8_t expected_hash[32] = {
+    0x6f, 0xa4, 0x64, 0xb0, 0x07, 0xf2, 0xd5, 0x77,
+    0xed, 0xfa, 0x5d, 0xfe, 0x9d, 0xfc, 0x3f, 0x92,
+    0x09, 0xf3, 0x6d, 0x1a, 0x67, 0x11, 0xd3, 0x14,
+    0xea, 0x68, 0xcc, 0xdd, 0x03, 0x00, 0x00, 0x00
+  };
+  bool known_hash_ok = false;
+
+  uint32_t buffer_swap[32];
+  for (int i = 0; i < 32; ++i)
+    buffer_swap[i] = __builtin_bswap32(((const uint32_t*)s_test_buffer)[i]);
+
+  esp_sha_lock_engine(SHA2_256);
+
+  for (int i = 0; i < test_count; ++i)
+  {
+      nerd_sha_ll_fill_text_block_sha256(buffer_swap);
+      sha_ll_start_block(SHA2_256);
+
+      nerd_sha_hal_wait_idle();
+      nerd_sha_ll_fill_text_block_sha256_upper(
+          buffer_swap + 16, 0x2e334119U + (uint32_t)i);
+      sha_ll_continue_block(SHA2_256);
+
+      nerd_sha_hal_wait_idle();
+      sha_ll_load(SHA2_256);
+
+      nerd_sha_hal_wait_idle();
+      nerd_sha_ll_fill_text_block_sha256_double();
+      sha_ll_start_block(SHA2_256);
+
+      nerd_sha_hal_wait_idle();
+      sha_ll_load(SHA2_256);
+
+      if (i == 0)
+      {
+          nerd_sha_ll_read_digest_swap(hash);
+          known_hash_ok = (memcmp(hash, expected_hash, sizeof(expected_hash)) == 0);
+      }
+      else
+      {
+          nerd_sha_ll_read_digest_swap_if(hash);
+      }
+  }
+
+  esp_sha_unlock_engine(SHA2_256);
+
+  Serial.print("SHA256d known-hash check: ");
+  Serial.println(known_hash_ok ? "PASS" : "FAIL");
 #endif
 
 #if 0

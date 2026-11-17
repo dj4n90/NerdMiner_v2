@@ -351,13 +351,9 @@ void init_WifiManager()
 
         // Copy the string value
         strncpy(Settings.PoolPassword, password_text_box.getValue(), sizeof(Settings.PoolPassword));
-        Serial.print("poolPassword: ");
-        Serial.println(Settings.PoolPassword);
 
         // Copy the string value
         strncpy(Settings.BtcWallet, addr_text_box.getValue(), sizeof(Settings.BtcWallet));
-        Serial.print("btcString: ");
-        Serial.println(Settings.BtcWallet);
 
         //Convert the number value
         Settings.Timezone = atoi(time_text_box_num.getValue());
@@ -393,13 +389,9 @@ void init_WifiManager()
 
     // Copy the string value
     strncpy(Settings.PoolPassword, password_text_box.getValue(), sizeof(Settings.PoolPassword));
-    Serial.print("poolPassword: ");
-    Serial.println(Settings.PoolPassword);
 
     // Copy the string value
     strncpy(Settings.BtcWallet, addr_text_box.getValue(), sizeof(Settings.BtcWallet));
-    Serial.print("btcString: ");
-    Serial.println(Settings.BtcWallet);
 
     //Convert the number value
     Settings.Timezone = atoi(time_text_box_num.getValue());

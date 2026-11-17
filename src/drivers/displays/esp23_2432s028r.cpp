@@ -180,7 +180,27 @@ void printPoolData(){
           render.cdrawString(pData.workersHash.c_str(), 265, 14, TFT_BLACK);
           render.setAlignment(Align::BottomLeft);
           render.cdrawString(pData.bestDifficulty.c_str(), 54, 14, TFT_BLACK);
-          background.pushSprite(0,190);      
+          background.pushSprite(0,190);
+
+          // Dynamische poolnaam met compact ingebouwd lettertype en subtiele schaduw
+          String poolName = Settings.PoolAddress;
+          tft.setFreeFont(NULL);
+          tft.setTextFont(1);
+          tft.setTextSize(1);
+          tft.setTextDatum(MC_DATUM);
+
+          tft.setTextColor(TFT_DARKGREY);
+          tft.drawString(poolName, 161, 186);
+          tft.setTextColor(TFT_WHITE);
+          tft.drawString(poolName, 160, 185);
+
+          // Herstel de standaard TFT-tekstinstellingen
+          tft.setFreeFont(NULL);
+          tft.setTextDatum(TL_DATUM);
+          tft.setTextSize(1);
+          tft.setTextFont(FONT2);
+          tft.setTextColor(TFT_BLACK);
+
           background.deleteSprite();
       } else {
         pData.bestDifficulty = "TESTNET";

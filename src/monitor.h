@@ -33,7 +33,7 @@
 //API public-pool.io
 // https://public-pool.io:40557/api/client/btcString
 #define getPublicPool "https://public-pool.io:40557/api/client/" // +btcString
-#define UPDATE_POOL_min   1
+#define UPDATE_POOL_min   5
 
 #define NEXT_HALVING_EVENT 1050000 //840000
 #define HALVING_BLOCKS 210000

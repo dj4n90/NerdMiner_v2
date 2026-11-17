@@ -1,7 +1,9 @@
-#include <Arduino.h>
+#include  <Arduino.h>
 #include <WiFi.h>
 #include "mbedtls/md.h"
 #include "HTTPClient.h"
+#include <WiFiClientSecure.h>
+#include "root_ca.h"
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <list>
@@ -64,7 +66,7 @@ void updateGlobalData(void){
             
         //Make first API call to get global hash and current difficulty
         HTTPClient http;
-        http.setTimeout(10000);
+        http.setTimeout(3000);
         try {
         http.begin(getGlobalHash);
         int httpCode = http.GET();
@@ -129,7 +131,7 @@ String getBlockHeight(void){
         if (WiFi.status() != WL_CONNECTED) return current_block;
             
         HTTPClient http;
-        http.setTimeout(10000);
+        http.setTimeout(3000);
         try {
         http.begin(getHeightAPI);
         int httpCode = http.GET();
@@ -165,7 +167,7 @@ String getBTCprice(void){
         }
         
         HTTPClient http;
-        http.setTimeout(10000);
+        http.setTimeout(3000);
         bool priceUpdated = false;
 
         try {
@@ -212,6 +214,7 @@ void getTime(unsigned long* currentHours, unsigned long* currentMinutes, unsigne
         if(timeClient.update()) mTriggerUpdate = millis(); //NTP call to get current time
         initialTime = timeClient.getEpochTime(); // Guarda la hora inicial (en segundos desde 1970)
         Serial.print("TimeClient NTPupdateTime ");
+        Serial.println(initialTime);
     }
   }
 
@@ -436,80 +439,102 @@ String getPoolAPIUrl(void) {
     return poolAPIUrl;
 }
 
-pool_data getPoolData(void){
-    //pool_data pData;    
-    if((mPoolUpdate == 0) || (millis() - mPoolUpdate > UPDATE_POOL_min * 60 * 1000)){      
-        if (WiFi.status() != WL_CONNECTED) return pData;            
-        //Make first API call to get global hash and current difficulty
-        HTTPClient http;
-        http.setTimeout(10000);        
-        try {          
-          String btcWallet = Settings.BtcWallet;
-          // Serial.println(btcWallet);
-          if (btcWallet.indexOf(".")>0) btcWallet = btcWallet.substring(0,btcWallet.indexOf("."));
-#ifdef SCREEN_WORKERS_ENABLE
-          Serial.println("Pool API : " + poolAPIUrl+btcWallet);
-          http.begin(poolAPIUrl+btcWallet);
-#else
-          http.begin(String(getPublicPool)+btcWallet);
-#endif
-          int httpCode = http.GET();
-          if (httpCode == HTTP_CODE_OK) {
-              String payload = http.getString();
-              // Serial.println(payload);
-              StaticJsonDocument<300> filter;
-              filter["bestDifficulty"] = true;
-              filter["workersCount"] = true;
-              filter["workers"][0]["sessionId"] = true;
-              filter["workers"][0]["hashRate"] = true;
-              StaticJsonDocument<2048> doc;
-              deserializeJson(doc, payload, DeserializationOption::Filter(filter));
-              //Serial.println(serializeJsonPretty(doc, Serial));
-              if (doc.containsKey("workersCount")) pData.workersCount = doc["workersCount"].as<int>();
-              const JsonArray& workers = doc["workers"].as<JsonArray>();
-              float totalhashs = 0;
-              for (const JsonObject& worker : workers) {
-                totalhashs += worker["hashRate"].as<double>();
-                /* Serial.print(worker["sessionId"].as<String>()+": ");
-                Serial.print(" - "+worker["hashRate"].as<String>()+": ");
-                Serial.println(totalhashs); */
-              }
-              char totalhashs_s[16] = {0};
-              suffix_string(totalhashs, totalhashs_s, 16, 0);
-              pData.workersHash = String(totalhashs_s);
+pool_data getPoolData(void) {
+    if ((mPoolUpdate == 0) || (millis() - mPoolUpdate > UPDATE_POOL_min * 60 * 1000)) {
+        if (WiFi.status() != WL_CONNECTED) return pData;
 
-              double temp;
-              if (doc.containsKey("bestDifficulty")) {
-              temp = doc["bestDifficulty"].as<double>();            
-              char best_diff_string[16] = {0};
-              suffix_string(temp, best_diff_string, 16, 0);
-              pData.bestDifficulty = String(best_diff_string);
-              }
-              doc.clear();
-              mPoolUpdate = millis();
-              Serial.println("\n####### Pool Data OK!");               
-          } else {
-              Serial.println("\n####### Pool Data HTTP Error!");    
-              /* Serial.println(httpCode);
-              String payload = http.getString();
-              Serial.println(payload); */
-              // mPoolUpdate = millis();
-              pData.bestDifficulty = "P";
-              pData.workersHash = "E";
-              pData.workersCount = 0;
-              http.end();
-              return pData; 
-          }
-          http.end();
-        } catch(...) {
-          Serial.println("####### Pool Error!");          
-          // mPoolUpdate = millis();
-          pData.bestDifficulty = "P";
-          pData.workersHash = "Error";
-          pData.workersCount = 0;
-          http.end();
-          return pData;
-        } 
+        HTTPClient http;
+        http.setTimeout(3000);
+
+        WiFiClient plainClient;
+        WiFiClientSecure secureClient;
+        bool useTLS = false;
+
+        try {
+            String btcWallet = Settings.BtcWallet;
+
+            if (btcWallet.indexOf(".") > 0) {
+                btcWallet = btcWallet.substring(0, btcWallet.indexOf("."));
+            }
+
+#ifdef SCREEN_WORKERS_ENABLE
+            String requestUrl = poolAPIUrl + btcWallet;
+
+            if (requestUrl.startsWith("https://")) {
+                secureClient.setCACert(rootCACertificate);
+                useTLS = true;
+                http.begin(secureClient, requestUrl);
+            } else {
+                http.begin(plainClient, requestUrl);
+            }
+#else
+            http.begin(String(getPublicPool) + btcWallet);
+#endif
+
+            int httpCode = http.GET();
+            Serial.printf("Pool API HTTP status: %d\n", httpCode);
+
+            if (httpCode == HTTP_CODE_OK) {
+                String payload = http.getString();
+
+                StaticJsonDocument<300> filter;
+                filter["hashrate1m"] = true;
+                filter["workers"] = true;
+                filter["bestshare"] = true;
+
+                StaticJsonDocument<2048> doc;
+                DeserializationError error = deserializeJson(
+                    doc, payload, DeserializationOption::Filter(filter)
+                );
+
+                if (!error) {
+                    if (doc.containsKey("workers")) {
+                        pData.workersCount = doc["workers"].as<int>();
+                    }
+
+                    if (doc.containsKey("hashrate1m")) {
+                        pData.workersHash = doc["hashrate1m"].as<String>();
+                    }
+
+                    if (doc.containsKey("bestshare")) {
+                        double temp = doc["bestshare"].as<double>();
+
+                        char best_diff_string[16] = {0};
+                        suffix_string(temp, best_diff_string, 16, 0);
+                        pData.bestDifficulty = String(best_diff_string);
+                    }
+
+                    Serial.println("\n####### Pool Data OK!");
+                } else {
+                    Serial.print("Pool JSON error: ");
+                    Serial.println(error.c_str());
+                }
+
+                doc.clear();
+                mPoolUpdate = millis();
+
+            } else {
+                if (useTLS) {
+                    char tlsError[128] = {0};
+                    int tlsCode = secureClient.lastError(tlsError, sizeof(tlsError));
+                    Serial.printf("Pool TLS error: %d (%s)\n", tlsCode, tlsError);
+                }
+
+                Serial.println("\n####### Pool Data HTTP Error!");
+                mPoolUpdate = millis();
+                http.end();
+                return pData;
+            }
+
+            http.end();
+
+        } catch (...) {
+            Serial.println("####### Pool Error!");
+            mPoolUpdate = millis();
+            http.end();
+            return pData;
+        }
     }
+
     return pData;
 }
